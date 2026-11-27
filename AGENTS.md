@@ -8,6 +8,8 @@ node --check <changed-file.js>
 
 Open `index.html` through a local static server (for example `npx serve .` or `python3 -m http.server`) and test the real gameplay change in a browser (desktop and touch/mobile controls). Report `Observed` vs. `Not run` honestly.
 
+When you change `game.js` or `skins.js`, bump the `?v=` number on their `<script>` tags in `index.html`. GitHub Pages lets browsers cache files for 10 minutes, so without a new number a refresh can load old code.
+
 For scripted checks, open `index.html?debug` (add `&fx=high` to keep effects on in a slow headless browser). That exposes `window.ballCrash` with `state`, `platform(i)`, `setRot(r)`, `startLevel(n)`, `startEndless()`, `goHome()`, `settings(n)`, `openSkins()`, `setSkin(id)` and `skin`, so a bot can steer through gaps, onto stars or into hazards.
 
 ## Rules
