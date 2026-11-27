@@ -1,14 +1,38 @@
-# New MoBlockz Game
+# BALL CRASH
 
-Starter template for kid-made **MoBlockz** browser games (`https://moblockz.com`).
+A comic-style 3D tower-drop arcade game by **par777**. Spin the tower to guide a bouncing ball down through the gaps, dodge the red spikes, and fall through 3 gaps in a row to go **FIREBALL** and smash straight through anything.
 
-## Included
+Open `index.html` in a browser to play. It needs no install or build (three.js is bundled in `vendor/`).
 
-- `AGENTS.md` & `CLAUDE.md` (`@AGENTS.md`) — Automatic MoBlockz dev rules for Claude Code, Codex, and Antigravity
-- `.gitignore` — Keeps `.audit/`, `.qa/`, and OS files untracked
+## Modes
+
+- **Levels:** reach the bottom without crashing to pass a level and unlock the next one. Each level has 3 gold stars floating in gaps. Drop through a star or smash its platform with a fireball to collect it. The level select shows a 1–3 star rating for each level.
+- **Endless:** one tower that never ends, and you get one life. Every 50 platforms a checkered ring starts a new, harder stage. Your best depth is saved.
+
+## Controls
+
+| Action | Input |
+| --- | --- |
+| Spin the tower | Drag (mouse / touch), or ← → / A D |
+| Menu buttons | Click / tap, or Space / Enter |
+| Back to home | ⌂ button or Esc |
+| Mute | M, or the speaker button |
+
+## Look
+
+Cel-shaded 3D with ink outlines and halftone dots, mixed with hand-drawn 2D effects: impact bursts, smear frames, anime focus lines and comic sound words. The ball and camera move smoothly (on ones). Effects move in steps (on twos and threes) for a punchy, drawn feel. Screen flashes are limited to about three per second.
+
+Slower devices switch off the heavy effects automatically. Add `?fx=low` or `?fx=high` to the URL to force them off or on.
 
 ## Publish on GitHub Pages
 
-1. Push `index.html` and game files to `main`.
+1. Merge the game into `main`.
 2. In GitHub: **Settings → Pages → Deploy from a branch (`main` / `/ (root)`)**.
 3. Add the game to `MoBlockz/website` (`apps/web/lib/games.ts`) to feature it on https://moblockz.com.
+
+## Files
+
+- `index.html`: page, HUD, menus and styles
+- `game.js`: game logic, rendering, effects and sound (Web Audio, no sound files)
+- `vendor/three.min.js`: three.js r149 (MIT, see `vendor/THREE-LICENSE.txt`)
+- `AGENTS.md` & `CLAUDE.md`: MoBlockz rules for AI coding tools
