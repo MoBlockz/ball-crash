@@ -8,6 +8,8 @@ node --check <changed-file.js>
 
 Open `index.html` through a local static server (for example `npx serve .` or `python3 -m http.server`) and test the real gameplay change in a browser (desktop and touch/mobile controls). Report `Observed` vs. `Not run` honestly.
 
+For scripted checks, open `index.html?debug` (add `&fx=high` to keep effects on in a slow headless browser). That exposes `window.ballCrash` with `state`, `platform(i)`, `setRot(r)`, `startLevel(n)`, `startEndless()`, `goHome()` and `settings(n)`, so a bot can steer through gaps, onto stars or into hazards.
+
 ## Rules
 
 - **Kid-friendly & safe by default:** Zero ads, zero accounts/logins, zero tracking. Use private room codes only for multiplayer.
