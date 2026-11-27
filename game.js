@@ -61,9 +61,11 @@
     flash: $('flash'), heat: $('heat'), ink: $('ink'),
     levelsSub: $('levelsSub'), endlessSub: $('endlessSub'), btnLevels: $('btnLevels'), btnEndless: $('btnEndless'),
     grid: $('grid'), starTotal: $('starTotal'), levelsBack: $('levelsBack'),
+    btnSkins: $('btnSkins'), skinsSub: $('skinsSub'), skinsImg: $('skinsImg'), skinGrid: $('skinGrid'),
+    skinHeroImg: $('skinHeroImg'), skinHeroName: $('skinHeroName'), skinsBack: $('skinsBack'),
     rTitle: $('rTitle'), rStars: $('rStars'), rBig: $('rBig'), rText: $('rText'), rStats: $('rStats'), rButtons: $('rButtons'),
   };
-  const panels = { home: $('pHome'), levels: $('pLevels'), result: $('pResult') };
+  const panels = { home: $('pHome'), levels: $('pLevels'), skins: $('pSkins'), result: $('pResult') };
 
   const store = {
     get(k, d) { try { const v = localStorage.getItem('ballcrash.' + k); return v === null ? d : JSON.parse(v); } catch { return d; } },
@@ -303,20 +305,53 @@
   scene.add(motes);
 
   // ---------- Ball: cel ball, ink outline, anime glint, smear frame, fire aura ----------
-  const ballMesh = inked(new THREE.Mesh(geos.ball, mats.ball), null, 1.11);
-  ballMesh.castShadow = true;
-  scene.add(ballMesh);
-  {
-    const glint = new THREE.Mesh(geos.glint, mats.glint);
-    const n = new THREE.Vector3(-0.42, 0.55, 0.72).normalize();
-    glint.position.copy(n).multiplyScalar(BALL_R * 1.005);
-    glint.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), n);
-    glint.scale.set(0.075, 0.045, 1);
-    glint.rotateZ(0.6);
-    ballMesh.add(glint);
+  // The ball is a group: `ballMesh` moves and squashes, `ballBody` spins (sports skins) or tilts (animal skins).
+  // Skins come from skins.js: a canvas texture per expression plus small 3D extras (ears, gills, beak...).
+  const SKINS = window.BallSkins.list;
+  const WHITE = new THREE.Color(0xffffff);
+  let skin = SKINS.find((s) => s.id === store.get('skin', 'classic')) || SKINS[0];
+  let skinTex = null;           // { normal, happy, fire } textures for the current skin, or null for Classic
+  let expr = 'normal', happyT = 0;
+
+  // Builds a ball. `material` is shared (main ball) or a fresh one (menu previews).
+  function buildBall(s, material) {
+    const root = new THREE.Group();
+    const body = new THREE.Mesh(geos.ball, material);
+    body.castShadow = true;
+    body.add(window.BallSkins.extras(s, { toon: (c) => toon({ color: c }), inked: (m, scale) => inked(m, null, scale) }));
+    const outline = new THREE.Mesh(geos.ball, mats.ink);
+    outline.scale.setScalar(1.11);
+    root.add(body, outline);
+    if (s.glint || !s.color) {
+      const glint = new THREE.Mesh(geos.glint, mats.glint);
+      const n = new THREE.Vector3(-0.42, 0.55, 0.72).normalize();
+      glint.position.copy(n).multiplyScalar(BALL_R * 1.005);
+      glint.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), n);
+      glint.scale.set(0.075, 0.045, 1);
+      glint.rotateZ(0.6);
+      root.add(glint);
+    }
+    return { root, body };
   }
-  const ballColor = new THREE.Color();
+
+  let ballMesh = null, ballBody = null;
+  function applySkin(s) {
+    skin = s;
+    store.set('skin', s.id);
+    skinTex = window.BallSkins.textures(s);
+    mats.ball.map = skinTex ? skinTex.normal : null;
+    mats.ball.needsUpdate = true;
+    expr = 'normal';
+    const visible = ballMesh ? ballMesh.visible : true;
+    if (ballMesh) scene.remove(ballMesh);
+    ({ root: ballMesh, body: ballBody } = buildBall(s, mats.ball));
+    ballMesh.visible = visible;
+    scene.add(ballMesh);
+  }
+  const ballColor = new THREE.Color();          // level theme colour (Classic skin)
+  const tint = new THREE.Color();               // the ball's main colour for splats, smears and bits
   const fireColor = new THREE.Color(0xff6a1a);
+  applySkin(skin);
 
   // Smear frame: a dry-brush streak stretched along the ball's motion.
   const smearMat = new THREE.ShaderMaterial({
@@ -663,8 +698,9 @@
     ballColor.lerp(themeTarget.ball, k);
     mats.finishB.color.copy(ballColor);
     mats.finishB.emissive.copy(ballColor);
-    mats.splat.color.copy(ballColor);
-    smearMat.uniforms.uColor.value.copy(ballColor);
+    if (skin.color) tint.set(skin.color); else tint.copy(ballColor);
+    mats.splat.color.copy(tint);
+    smearMat.uniforms.uColor.value.copy(tint);
     skyMat.uniforms.uTop.value.lerp(themeTarget.top, k);
     skyMat.uniforms.uBot.value.lerp(themeTarget.bot, k);
     scene.fog.color.copy(skyMat.uniforms.uBot.value).lerp(skyMat.uniforms.uTop.value, 0.35);
@@ -938,7 +974,7 @@
 
   // "Multiples": held ghost copies of the ball left behind on twos while falling fast.
   function multiples() {
-    const g = new THREE.Mesh(geos.ball, new THREE.MeshBasicMaterial({ color: ballColor.clone(), transparent: true, opacity: 0.45, depthWrite: false }));
+    const g = new THREE.Mesh(geos.ball, new THREE.MeshBasicMaterial({ color: tint.clone(), transparent: true, opacity: 0.45, depthWrite: false }));
     g.position.copy(ballMesh.position);
     g.scale.copy(ballMesh.scale);
     scene.add(g);
@@ -1126,10 +1162,11 @@
     streak = 0;
     addSplat(p);
     const at = new THREE.Vector3(0, top + 0.03, BALL_Z);
-    ring(at, ballColor.clone().multiplyScalar(1.3), 0.25, 1.1, 0.3);
+    ring(at, tint.clone().multiplyScalar(1.3), 0.25, 1.1, 0.3);
     if (state === 'play') {
+      happyT = 0.4;
       impact(at.clone().setY(top + 0.15), 0xffffff, 0.9, 0.1);
-      spray({ geo: geos.chip, colors: [ballColor.clone()], count: 5, at, speed: 3.5, life: 0.4, gravity: 18, scale: [0.4, 0.8], up: 0.6 });
+      spray({ geo: geos.chip, colors: [tint.clone()], count: 5, at, speed: 3.5, life: 0.4, gravity: 18, scale: [0.4, 0.8], up: 0.6 });
       if (Math.random() < 0.3) popup(pick(SFX_WORDS.bounce), 'small');
     }
     sfx.bounce();
@@ -1142,7 +1179,7 @@
     ballMesh.visible = false;
     const at = ballPos();
     impactFrame(true);
-    spray({ geo: geos.chip, colors: [ballColor.clone()], count: 24, at, speed: 7, life: 1.1, gravity: 16, scale: [0.6, 1.4] });
+    spray({ geo: geos.chip, colors: [tint.clone()], count: 24, at, speed: 7, life: 1.1, gravity: 16, scale: [0.6, 1.4] });
     spray({ sprite: sparkleTex, colors: [hdr(3, 0.5, 0.4), hdr(2.6, 2, 1.6)], count: 20, at, speed: 9, life: 0.6, gravity: 4, drag: 2, scale: [0.3, 0.6] });
     impact(at, 0xff5060, 3, 0.25);
     ring(at, hdr(1.6, 0.25, 0.25), 0.2, 4.5, 0.55);
@@ -1289,6 +1326,9 @@
     const stars = totalStars();
     ui.levelsSub.textContent = 'Level ' + unlocked + (stars ? '  ·  ★ ' + stars : '');
     ui.endlessSub.textContent = bestDepth ? 'Best depth ' + bestDepth : 'How deep can you go?';
+    if (!skinPreviews) skinPreviews = makeSkinPreviews();
+    ui.skinsSub.textContent = skin.name;
+    ui.skinsImg.src = skinPreviews[skin.id];
     primaryAction = () => startLevel(unlocked);
     showPanel('home');
   }
@@ -1313,6 +1353,63 @@
     primaryAction = () => startLevel(unlocked);
     showPanel('levels');
     if (current) current.scrollIntoView({ block: 'center' });
+  }
+
+  // Menu pictures of every skin, rendered once with a small separate renderer and kept as images.
+  let skinPreviews = null;
+  function makeSkinPreviews() {
+    const size = 160;
+    const r = new THREE.WebGLRenderer({ antialias: true, alpha: true, preserveDrawingBuffer: true });
+    r.setPixelRatio(1);
+    r.setSize(size, size, false);
+    r.outputEncoding = THREE.sRGBEncoding;
+    const sc = new THREE.Scene();
+    sc.add(new THREE.HemisphereLight(0xffffff, 0x3a2a5a, 0.45));
+    const light = new THREE.DirectionalLight(0xffffff, 0.8);
+    light.position.set(1.5, 2.5, 3);
+    sc.add(light);
+    const cam = new THREE.PerspectiveCamera(30, 1, 0.1, 10);
+    cam.position.set(0, 0.5, 1.5);
+    cam.lookAt(0, 0.04, 0);
+    const out = {};
+    for (const s of SKINS) {
+      const tex = window.BallSkins.textures(s);
+      const mat = toon(tex ? { map: tex.normal } : { color: ballColor.clone() });
+      const { root } = buildBall(s, mat);
+      sc.add(root);
+      r.render(sc, cam);
+      out[s.id] = r.domElement.toDataURL('image/png');
+      sc.remove(root);
+      mat.dispose();
+    }
+    r.dispose();
+    r.forceContextLoss();
+    return out;
+  }
+
+  function openSkins() {
+    if (!skinPreviews) skinPreviews = makeSkinPreviews();
+    ui.skinGrid.innerHTML = '';
+    const groups = { animals: 'ANIMALS', sports: 'BALLS' };
+    for (const [g, label] of Object.entries(groups)) {
+      ui.skinGrid.appendChild(Object.assign(document.createElement('div'), { className: 'skinGroup', textContent: label }));
+      for (const s of SKINS.filter((x) => x.group === g)) {
+        const b = document.createElement('button');
+        b.className = 'skin' + (s.id === skin.id ? ' on' : '');
+        b.innerHTML = `<img alt="" src="${skinPreviews[s.id]}"><span>${s.name}</span>`;
+        b.addEventListener('click', () => {
+          ensureAudio();
+          applySkin(s);
+          sfx.star();
+          openSkins();
+        });
+        ui.skinGrid.appendChild(b);
+      }
+    }
+    ui.skinHeroImg.src = skinPreviews[skin.id];
+    ui.skinHeroName.textContent = skin.name;
+    primaryAction = goHome;
+    showPanel('skins');
   }
 
   function startRun(newMode, n) {
@@ -1378,6 +1475,8 @@
 
   ui.btnLevels.addEventListener('click', () => { ensureAudio(); openLevels(); });
   ui.btnEndless.addEventListener('click', () => startEndless());
+  ui.btnSkins.addEventListener('click', () => { ensureAudio(); openSkins(); });
+  ui.skinsBack.addEventListener('click', () => goHome());
   ui.levelsBack.addEventListener('click', () => goHome());
   ui.homeBtn.addEventListener('click', () => goHome());
   ui.mute.addEventListener('click', () => { ensureAudio(); setMuted(!muted); });
@@ -1488,6 +1587,7 @@
   let acc = 0;
   let twosAcc = 0, threesAcc = 0;
   let shakeX = 0, shakeY = 0;
+  let lastTowerRot = 0;
 
   function frame(now) {
     requestAnimationFrame(frame);
@@ -1554,7 +1654,22 @@
     ballMesh.position.set(0, ball.y - sq * BALL_R * 0.5, BALL_Z);
     ballMesh.scale.set((1 + sq * 0.6) * (1 - stretch * 0.4), (1 - sq) * (1 + stretch), (1 + sq * 0.6) * (1 - stretch * 0.4));
     mats.ball.emissiveIntensity = fireAmt * 1.6;
-    mats.ball.color.copy(ballColor).lerp(fireColor, Math.min(1, fireAmt * 1.2));
+    mats.ball.color.copy(skinTex ? WHITE : ballColor).lerp(fireColor, Math.min(1, fireAmt * (skinTex ? 0.55 : 1.2)));
+
+    // Skin life: sports balls spin as they fall and as the tower turns; animals keep their face to you and wobble.
+    if (skin.spin) {
+      ballBody.rotation.x += rawDt * (1.5 + Math.abs(ball.vy) * 0.12);
+      ballBody.rotation.y += (towerRot - lastTowerRot) * 2.2;
+    } else {
+      ballBody.rotation.x = Math.max(-0.2, Math.min(0.3, -ball.vy * 0.014));
+      ballBody.rotation.z = Math.sin(fxTime * 3) * 0.06 + (happyT > 0 ? Math.sin(happyT * 30) * 0.12 : 0);
+    }
+    lastTowerRot = towerRot;
+    happyT = Math.max(0, happyT - dt);
+    if (skinTex && skinTex.fire) {
+      const want = fireAmt > 0.2 ? 'fire' : happyT > 0 ? 'happy' : 'normal';
+      if (want !== expr) { expr = want; mats.ball.map = skinTex[want]; }
+    }
 
     // Smear frame behind the ball when it moves fast.
     const falling = Math.max(0, -ball.vy - 9) * 0.1, rising = Math.max(0, ball.vy - 9) * 0.06;
@@ -1680,7 +1795,9 @@
           smashed: p.smashed, star: p.star ? p.star.angle : null };
       },
       settings: levelSettings,
-      startLevel, startEndless, goHome, openLevels,
+      startLevel, startEndless, goHome, openLevels, openSkins,
+      setSkin(id) { applySkin(SKINS.find((x) => x.id === id)); },
+      get skin() { return { id: skin.id, hasMap: !!mats.ball.map, expr, extras: ballBody.children.length ? ballBody.children[0].children.length : 0 }; },
     };
   }
 

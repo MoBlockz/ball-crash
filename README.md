@@ -9,6 +9,13 @@ Open `index.html` in a browser to play. It needs no install or build (three.js i
 - **Levels:** reach the bottom without crashing to pass a level and unlock the next one. Each level has 3 gold stars floating in gaps. Drop through a star or smash its platform with a fireball to collect it. The level select shows a 1–3 star rating for each level.
 - **Endless:** one tower that never ends, and you get one life. Every 50 platforms a checkered ring starts a new, harder stage. Your best depth is saved.
 
+## Balls
+
+Tap **BALLS** on the home screen to pick your ball. Your choice is saved.
+
+- **Animals:** Panda, Axolotl, Kitty, Froggy, Chick and Bunny. Each has a kawaii face that smiles "^ ^" when it bounces and goes "> <" in fireball mode, plus 3D ears, gills, frog eyes or a beak.
+- **Balls:** Classic (matches the level colours), Football, Basketball, Tennis and Baseball. These spin as they fall.
+
 ## Controls
 
 | Action | Input |
@@ -34,5 +41,6 @@ Slower devices switch off the heavy effects automatically. Add `?fx=low` or `?fx
 
 - `index.html`: page, HUD, menus and styles
 - `game.js`: game logic, rendering, effects and sound (Web Audio, no sound files)
+- `skins.js`: ball skins, drawn in code (patterns, kawaii faces and 3D extras)
 - `vendor/three.min.js`: three.js r149 (MIT, see `vendor/THREE-LICENSE.txt`)
 - `AGENTS.md` & `CLAUDE.md`: MoBlockz rules for AI coding tools
