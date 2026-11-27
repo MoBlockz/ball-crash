@@ -1,5 +1,7 @@
 /* Ball Crash — rotate the tower, drop the ball, crash through everything.
- * Look: 3D cel-shaded world with ink outlines, halftone shading and hand-drawn 2D effects.
+ * Two art styles, switchable in Settings:
+ *   comic: cel shading, ink outlines, halftone dots, hand-drawn bursts and sound words.
+ *   neon:  glossy neon idol-concert look with rim light, spotlights, light slashes, glitter and glitch flashes.
  * Gameplay (ball, camera) animates "on ones"; effects animate "on twos/threes" for a punchy stepped feel. */
 (() => {
   'use strict';
@@ -37,7 +39,7 @@
 
   const SAFE = 0, GAP = 1, HAZ = 2;
 
-  const THEMES = [
+  const COMIC_THEMES = [
     { bg: ['#1b1340', '#3b1f6b'], safe: 0x8a6bff, pole: 0xf1eaff, ball: 0xffd23f },
     { bg: ['#05263b', '#0b5470'], safe: 0x1fd1c1, pole: 0xe8fbff, ball: 0xfff275 },
     { bg: ['#2a1205', '#6b2f0b'], safe: 0x4fbaff, pole: 0xfff4e0, ball: 0xffffff },
@@ -45,10 +47,21 @@
     { bg: ['#2b0b2e', '#5e1a63'], safe: 0xff85dc, pole: 0xfff0fd, ball: 0x8cf5ff },
     { bg: ['#101a2e', '#2a3f66'], safe: 0xe4ecfa, pole: 0x8fb3ff, ball: 0xffb347 },
   ];
+  // Neon idol palettes: dark night skies, candy-neon platforms and a coloured rim light.
+  const NEON_THEMES = [
+    { bg: ['#0b0420', '#3a0b5e'], safe: 0xff4fb8, pole: 0xd9c8ff, ball: 0xfff1a8, rim: 0x6ef3ff },
+    { bg: ['#020b1f', '#0a3a6b'], safe: 0x29d8ff, pole: 0xe0f4ff, ball: 0xff7ae0, rim: 0xff4fd8 },
+    { bg: ['#0a0206', '#4a0618'], safe: 0xc6b5ff, pole: 0xffe0e8, ball: 0xffffff, rim: 0xff2b55 },
+    { bg: ['#120626', '#5a1d73'], safe: 0xffc23d, pole: 0xfff0d0, ball: 0x9ff7ff, rim: 0xff5ecf },
+    { bg: ['#03161a', '#0c4f5a'], safe: 0x6dffc8, pole: 0xe8fff8, ball: 0xff8fd0, rim: 0xb57bff },
+    { bg: ['#070a24', '#24336e'], safe: 0xe6ecff, pole: 0x9fb6ff, ball: 0xffb347, rim: 0x79a8ff },
+  ];
 
   // HDR colours (values above 1 glow through the bloom pass).
   const hdr = (r, g, b) => new THREE.Color().setRGB(r, g, b);
-  const SPARK_COLORS = [hdr(3, 2.2, 0.7), hdr(3, 1.2, 0.25), hdr(2.4, 2.4, 2.2)];
+  const COMIC_SPARKS = [hdr(3, 2.2, 0.7), hdr(3, 1.2, 0.25), hdr(2.4, 2.4, 2.2)];
+  const NEON_SPARKS = [hdr(2.6, 1.1, 2.4), hdr(1.1, 2.2, 2.8), hdr(2.8, 2.4, 1.6)];
+  const sparks = () => (style === 'neon' ? NEON_SPARKS : COMIC_SPARKS);
   const GOLD_COLORS = [hdr(2.8, 2.2, 0.5), hdr(2.4, 2.4, 2.3), hdr(2.6, 1.6, 0.3)];
 
   // ---------- DOM ----------
@@ -61,17 +74,19 @@
     flash: $('flash'), heat: $('heat'), ink: $('ink'),
     levelsSub: $('levelsSub'), endlessSub: $('endlessSub'), btnLevels: $('btnLevels'), btnEndless: $('btnEndless'),
     grid: $('grid'), starTotal: $('starTotal'), levelsBack: $('levelsBack'),
+    btnSettings: $('btnSettings'), settingsBack: $('settingsBack'), soundOpt: $('soundOpt'),
     btnSkins: $('btnSkins'), skinsSub: $('skinsSub'), skinsImg: $('skinsImg'), skinGrid: $('skinGrid'),
     skinHeroImg: $('skinHeroImg'), skinHeroName: $('skinHeroName'), skinsBack: $('skinsBack'),
     rTitle: $('rTitle'), rStars: $('rStars'), rBig: $('rBig'), rText: $('rText'), rStats: $('rStats'), rButtons: $('rButtons'),
   };
-  const panels = { home: $('pHome'), levels: $('pLevels'), skins: $('pSkins'), result: $('pResult') };
+  const panels = { home: $('pHome'), levels: $('pLevels'), skins: $('pSkins'), settings: $('pSettings'), result: $('pResult') };
 
   const store = {
     get(k, d) { try { const v = localStorage.getItem('ballcrash.' + k); return v === null ? d : JSON.parse(v); } catch { return d; } },
     set(k, v) { try { localStorage.setItem('ballcrash.' + k, JSON.stringify(v)); } catch { /* ignore */ } },
   };
-  const FX_PARAM = new URLSearchParams(location.search).get('fx');   // 'high' forces effects on, 'low' forces off
+  const FX_PARAM = new URLSearchParams(location.search).get('fx');
+  let style = 'neon';          // 'neon' | 'comic', set by applyStyle()   // 'high' forces effects on, 'low' forces off
 
   const rand = (n) => Math.floor(Math.random() * n);
   const rnd = (a, b) => a + Math.random() * (b - a);
@@ -90,7 +105,8 @@
   scene.fog = new THREE.Fog(0x000000, 14, 34);
   const camera = new THREE.PerspectiveCamera(BASE_FOV, 1, 0.1, 140);
 
-  scene.add(new THREE.HemisphereLight(0xffffff, 0x3a2a5a, 0.3));
+  const hemi = new THREE.HemisphereLight(0xffffff, 0x3a2a5a, 0.3);
+  scene.add(hemi);
   const sun = new THREE.DirectionalLight(0xffffff, 0.72);
   sun.castShadow = true;
   sun.shadow.mapSize.set(1024, 1024);
@@ -162,20 +178,65 @@
     g.fillStyle = '#ffffff'; g.fill();
     g.save(); g.translate(64, 64); g.scale(0.55, 0.55); g.translate(-64, -64); path(); g.fillStyle = '#ffe98a'; g.fill(); g.restore();
   }));
-  // Three-step light ramp for cel shading.
+  // Neon: lens-flare stars (three variants so they shimmer), painted light slashes and hearts.
+  const flareTex = [0, 1, 2].map(() => canvasTex(128, (g) => {
+    g.translate(64, 64);
+    g.globalCompositeOperation = 'lighter';
+    const grad = g.createRadialGradient(0, 0, 0, 0, 0, 40);
+    grad.addColorStop(0, 'rgba(255,255,255,1)'); grad.addColorStop(0.25, 'rgba(255,255,255,0.55)'); grad.addColorStop(1, 'rgba(255,255,255,0)');
+    g.fillStyle = grad; g.beginPath(); g.arc(0, 0, 40, 0, TAU); g.fill();
+    const rays = 4 + rand(3);
+    for (let i = 0; i < rays; i++) {
+      g.save(); g.rotate((i / rays) * Math.PI + rnd(-0.15, 0.15));
+      const lg = g.createLinearGradient(-62, 0, 62, 0);
+      lg.addColorStop(0, 'rgba(255,255,255,0)'); lg.addColorStop(0.5, 'rgba(255,255,255,0.95)'); lg.addColorStop(1, 'rgba(255,255,255,0)');
+      g.fillStyle = lg; const w = rnd(2.4, 5.2); g.fillRect(-62, -w / 2, 124, w);
+      g.restore();
+    }
+  }, false));
+  const slashTex = canvasTex(256, (g) => {
+    g.translate(128, 200);
+    g.globalCompositeOperation = 'lighter';
+    g.lineCap = 'round';
+    for (let k = 0; k < 14; k++) {
+      const grad = g.createLinearGradient(-150, 0, 150, 0);
+      grad.addColorStop(0, 'rgba(255,255,255,0)'); grad.addColorStop(0.5, 'rgba(255,255,255,' + rnd(0.4, 0.9).toFixed(2) + ')'); grad.addColorStop(1, 'rgba(255,255,255,0)');
+      g.strokeStyle = grad; g.lineWidth = rnd(2, 9);
+      g.beginPath(); g.arc(0, 0, 150 + rnd(-14, 10), -Math.PI / 2 - rnd(0.55, 0.75), -Math.PI / 2 + rnd(0.55, 0.75)); g.stroke();
+    }
+  }, false);
+  const heartTex = canvasTex(64, (g) => {
+    g.fillStyle = '#ffffff'; g.translate(32, 34);
+    g.beginPath(); g.moveTo(0, 18); g.bezierCurveTo(-30, -2, -14, -26, 0, -10); g.bezierCurveTo(14, -26, 30, -2, 0, 18); g.fill();
+  }, false);
+
+  // Light ramp for toon shading: 3 hard bands for comic, 6 softer bands for neon (see applyStyle).
   const ramp = (() => {
-    const levels = [72, 150, 255];
-    const data = new Uint8Array(levels.length * 4);
-    levels.forEach((v, i) => data.set([v, v, v, 255], i * 4));
-    const t = new THREE.DataTexture(data, levels.length, 1, THREE.RGBAFormat);
+    const t = new THREE.DataTexture(new Uint8Array(6 * 4), 6, 1, THREE.RGBAFormat);
     t.minFilter = t.magFilter = THREE.NearestFilter;
     t.generateMipmaps = false;
-    t.needsUpdate = true;
     return t;
   })();
+  function setRamp(levels) {
+    levels.forEach((v, i) => ramp.image.data.set([v, v, v, 255], i * 4));
+    ramp.needsUpdate = true;
+  }
+  setRamp([72, 72, 150, 150, 255, 255]);
 
   // ---------- Materials / geometry ----------
-  const toon = (o = {}) => new THREE.MeshToonMaterial({ gradientMap: ramp, ...o });
+  const rimU = { rimColor: { value: new THREE.Color(0xffffff) }, rimStrength: { value: 0 } };
+  const toon = (o = {}) => {
+    const m = new THREE.MeshToonMaterial({ gradientMap: ramp, ...o });
+    m.onBeforeCompile = (sh) => {
+      sh.uniforms.rimColor = rimU.rimColor;
+      sh.uniforms.rimStrength = rimU.rimStrength;
+      sh.fragmentShader = 'uniform vec3 rimColor;\nuniform float rimStrength;\n' + sh.fragmentShader.replace('#include <output_fragment>',
+        'float rimF = pow(1.0 - clamp(dot(normalize(normal), normalize(vViewPosition)), 0.0, 1.0), 2.6);\n' +
+        'outgoingLight += rimColor * rimF * rimStrength;\n#include <output_fragment>');
+    };
+    m.customProgramCacheKey = () => 'toon-rim';
+    return m;
+  };
   const mats = {
     safe: toon(),
     haz: toon({ color: 0x2a0610, emissive: 0xff1030, emissiveIntensity: 0.6 }),
@@ -185,7 +246,8 @@
     pole: toon({ map: stripeTex }),
     ball: toon({ emissive: 0xff5a00, emissiveIntensity: 0 }),
     star: toon({ color: 0xffd23f, emissive: 0xffb000, emissiveIntensity: 1.3 }),
-    ink: new THREE.MeshBasicMaterial({ color: INK, side: THREE.BackSide }),
+    ink: new THREE.MeshBasicMaterial({ color: INK, side: THREE.BackSide }),        // ball, extras, stars
+    inkSeg: new THREE.MeshBasicMaterial({ color: INK, side: THREE.BackSide }),     // platforms, spikes, pole (off in neon)
     glint: new THREE.MeshBasicMaterial({ color: hdr(1.4, 1.4, 1.4) }),
     splat: new THREE.MeshBasicMaterial({ transparent: true, opacity: 0.9, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -2 }),
     sparkle: new THREE.SpriteMaterial({ map: sparkleTex, color: hdr(2.2, 1.8, 0.6), transparent: true, depthWrite: false, blending: THREE.AdditiveBlending }),
@@ -244,23 +306,24 @@
   };
 
   // Ink outline: a slightly bigger back-face copy drawn in INK behind the mesh.
-  function inked(mesh, geo, scale = 1) {
-    const o = new THREE.Mesh(geo || mesh.geometry, mats.ink);
+  function inked(mesh, geo, scale = 1, material = null) {
+    const o = new THREE.Mesh(geo || mesh.geometry, material || mats.ink);
     o.scale.setScalar(scale);
     o.userData.ink = true;
     mesh.add(o);
     return mesh;
   }
 
-  // ---------- Sky: flat cel bands, halftone dots and stepped twinkling stars ----------
+  // ---------- Sky: comic (cel bands, halftone) or neon (night glow, moon, spotlights, bokeh, glitter) ----------
   const skyMat = new THREE.ShaderMaterial({
     uniforms: {
       uTop: { value: new THREE.Color() }, uBot: { value: new THREE.Color() }, uTime: { value: 0 },
       uScroll: { value: 0 }, uHeat: { value: 0 }, uAspect: { value: 1 }, uDot: { value: 7 },
+      uStyle: { value: 1 }, uRim: { value: new THREE.Color(0x6ef3ff) },
     },
     vertexShader: 'varying vec2 vUv; void main() { vUv = uv; gl_Position = vec4(position.xy, 1.0, 1.0); }',
     fragmentShader: NOISE_GLSL + `
-      uniform vec3 uTop, uBot; uniform float uTime, uScroll, uHeat, uAspect, uDot; varying vec2 vUv;
+      uniform vec3 uTop, uBot, uRim; uniform float uTime, uScroll, uHeat, uAspect, uDot, uStyle; varying vec2 vUv;
       float stars(vec2 uv, float scale, float seed) {
         vec2 g = uv * scale; vec2 id = floor(g); vec2 f = fract(g) - 0.5;
         float h = hash(vec3(id, seed));
@@ -270,8 +333,34 @@
         float cross = max(step(d.x, 0.03) * step(d.y, 0.16), step(d.y, 0.03) * step(d.x, 0.16));   // four-point star
         return cross * step(0.5, fract(h * 13.0 + uTime * 0.5));                                      // blinks on/off
       }
-      void main() {
-        vec2 uv = vUv;
+      vec3 neonSky(vec2 uv) {
+        vec3 c = mix(uBot, uTop, smoothstep(-0.2, 1.05, uv.y));
+        vec2 p = vec2(uv.x * uAspect, uv.y + uScroll);
+        float n = noise(vec3(p * vec2(1.3, 1.9), uTime * 0.04)) * 0.65 + noise(vec3(p * vec2(3.6, 4.4) + 5.0, uTime * 0.06)) * 0.35;
+        c += uRim * pow(n, 2.6) * 0.45;                                        // glowing haze
+        float md = length(vec2((uv.x - 0.8) * uAspect, uv.y - 0.82));
+        c += vec3(1.0, 0.96, 1.0) * smoothstep(0.072, 0.066, md) * 0.85;       // moon
+        c += uRim * exp(-md * 7.0) * 0.45;                                     // moon halo
+        for (int i = 0; i < 4; i++) {                                          // sweeping concert spotlights
+          float fi = float(i);
+          vec2 d = (uv - vec2(0.12 + fi * 0.25, -0.25)) * vec2(uAspect, 1.0);
+          float ang = atan(d.x, d.y) - sin(uTime * 0.45 + fi * 1.9) * 0.45;
+          c += mix(uRim, vec3(1.0), 0.35) * exp(-ang * ang * 90.0) * smoothstep(1.4, 0.1, length(d)) * 0.16;
+        }
+        vec2 bp = vec2(uv.x * uAspect, uv.y + uScroll * 0.35) * 5.0;           // soft bokeh lights
+        vec2 id = floor(bp); vec2 f = fract(bp) - 0.5;
+        float h = hash(vec3(id, 3.0));
+        if (h > 0.72) {
+          vec2 o2 = vec2(hash(vec3(id, 4.0)), hash(vec3(id, 5.0))) - 0.5;
+          float r = 0.1 + 0.16 * hash(vec3(id, 6.0));
+          c += mix(uRim, vec3(1.0, 0.6, 0.9), hash(vec3(id, 7.0))) * smoothstep(r, r * 0.75, length(f - o2 * 0.5)) * 0.11;
+        }
+        vec2 sp = vec2(uv.x * uAspect, uv.y + uScroll * 0.6);
+        c += vec3(1.0) * stars(sp, 60.0, 1.0) * 0.55 + uRim * stars(sp + 3.7, 28.0, 9.0) * 0.8;   // glitter
+        c += vec3(1.0, 0.25, 0.55) * uHeat * pow(1.0 - uv.y, 2.0) * 0.4;
+        return c;
+      }
+      vec3 comicSky(vec2 uv) {
         float t = smoothstep(-0.15, 1.1, uv.y);
         vec3 c = mix(uBot, uTop, floor(t * 5.0) / 4.0);                       // banded gradient
         vec2 p = vec2(uv.x * uAspect, uv.y + uScroll);
@@ -285,6 +374,10 @@
         vec2 sp = vec2(uv.x * uAspect, uv.y + uScroll * 0.6);
         c += vec3(1.0) * stars(sp, 46.0, 1.0) * 0.8 + vec3(1.0, 0.9, 0.6) * stars(sp + 3.7, 22.0, 9.0);
         c += vec3(1.0, 0.35, 0.05) * uHeat * step(uv.y, 0.35 + noise(vec3(uv.x * 9.0, uTime * 3.0, 0.0)) * 0.15) * 0.45;
+        return c;
+      }
+      void main() {
+        vec3 c = uStyle > 0.5 ? neonSky(vUv) : comicSky(vUv);
         gl_FragColor = vec4(c, 1.0);` + OUTPUT_GLSL + `
       }`,
     depthTest: false, depthWrite: false,
@@ -402,6 +495,15 @@
   }
   const flameInner = new THREE.Mesh(new THREE.SphereGeometry(BALL_R * 1.35, 32, 22), makeFlameMaterial(0.9));
   const flameOuter = new THREE.Mesh(new THREE.SphereGeometry(BALL_R * 1.8, 32, 22), makeFlameMaterial(1.9));
+  function setFlameColors(neon) {
+    for (const f of [flameInner, flameOuter]) {
+      const u = f.material.uniforms;
+      u.uCore.value.copy(neon ? hdr(1.2, 1.05, 0.8) : hdr(1.7, 1.5, 0.75));
+      u.uMid.value.copy(neon ? hdr(1.1, 0.22, 0.6) : hdr(1.45, 0.55, 0.08));
+      u.uOut.value.copy(neon ? hdr(0.45, 0.1, 0.95) : hdr(0.95, 0.12, 0.04));
+      u.uInk.value.setHex(neon ? 0x2a0c44 : INK);
+    }
+  }
   const flames = new THREE.Group();
   flames.add(flameOuter, flameInner);
   flames.visible = false;
@@ -459,12 +561,16 @@
       }`, { tDiffuse: { value: null }, dir: { value: new THREE.Vector2() } });
 
     const compMat = mat(`
-      uniform sampler2D tScene, tB0, tB1, tB2, tB3; uniform float strength, ca, dotSize, halftone; varying vec2 vUv;
+      uniform sampler2D tScene, tB0, tB1, tB2, tB3; uniform float strength, ca, dotSize, halftone, grain, glitch, uTime; varying vec2 vUv;
+      float h1(float x) { return fract(sin(x * 91.3458) * 47453.5453); }
       vec3 rolloff(vec3 c) { return mix(c, 0.8 + 0.2 * (1.0 - exp(-(c - 0.8) / 0.2)), step(0.8, c)); }   // keeps cel colours, tames HDR
       vec3 toSRGB(vec3 c) { return mix(c * 12.92, 1.055 * pow(c, vec3(1.0 / 2.4)) - 0.055, step(0.0031308, c)); }
       void main() {
-        vec2 off = (vUv - 0.5) * ca * 0.012 + vec2(0.0012, 0.0) * (0.35 + ca);            // print misregistration
-        vec3 c = vec3(texture2D(tScene, vUv + off).r, texture2D(tScene, vUv).g, texture2D(tScene, vUv - off).b);
+        vec2 uv = vUv;
+        float slice = floor(uv.y * 28.0) + floor(uTime * 24.0) * 7.0;                   // music-video glitch slices
+        uv.x += step(0.55, h1(slice)) * (h1(slice + 3.1) - 0.5) * glitch * 0.08;
+        vec2 off = (uv - 0.5) * (ca + glitch * 2.0) * 0.012 + vec2(0.0012, 0.0) * (0.35 + ca);   // colour misregistration
+        vec3 c = vec3(texture2D(tScene, uv + off).r, texture2D(tScene, uv).g, texture2D(tScene, uv - off).b);
         vec3 b = texture2D(tB0, vUv).rgb * 0.5 + texture2D(tB1, vUv).rgb * 0.7 + texture2D(tB2, vUv).rgb * 0.9 + texture2D(tB3, vUv).rgb * 1.1;
         c = toSRGB(clamp(rolloff(c + b * strength), 0.0, 1.0));
         // halftone dots in the shadows
@@ -473,16 +579,22 @@
         float r = clamp((0.42 - lum) * 1.6, 0.0, 0.6);
         float dotMask = 1.0 - smoothstep(r - 0.06, r, length(fract(g) - 0.5));
         c = mix(c, c * 0.45, dotMask * halftone);
+        c += (h1(dot(gl_FragCoord.xy, vec2(12.9898, 78.233)) + fract(uTime)) - 0.5) * grain;   // film grain
         gl_FragColor = vec4(c, 1.0);
       }`, {
       tScene: { value: sceneRT.texture }, tB0: { value: levels[0].b.texture }, tB1: { value: levels[1].b.texture },
       tB2: { value: levels[2].b.texture }, tB3: { value: levels[3].b.texture },
-      strength: { value: 0.7 }, ca: { value: 0 }, dotSize: { value: 5 }, halftone: { value: 0.8 },
+      strength: { value: 0.7 }, ca: { value: 0 }, dotSize: { value: 5 }, halftone: { value: 0.8 }, grain: { value: 0 }, glitch: { value: 0 }, uTime: { value: 0 },
     });
 
     const pass = (material, target) => { quad.material = material; renderer.setRenderTarget(target); renderer.render(quadScene, quadCam); };
     return {
       uniforms: compMat.uniforms,
+      setStyle(neon) {
+        brightMat.uniforms.threshold.value = neon ? 0.95 : 1.3;
+        compMat.uniforms.halftone.value = neon ? 0 : 0.8;
+        compMat.uniforms.grain.value = neon ? 0.045 : 0;
+      },
       setSize(w, h, pr) {
         sceneRT.setSize(w, h);
         const bw = Math.max(1, w >> 1), bh = Math.max(1, h >> 1);
@@ -529,14 +641,15 @@
   let platforms = [];
   let nextIdx = 0;
   let pole = null;
-  let theme = THEMES[0];
+  let theme = NEON_THEMES[0];
+  let themeIdx = 0;
   let camY = 0;
   let time = 0;                // gameplay clock (reset each run)
   let fxTime = 0;              // effects clock (never resets)
   // Cinematic effect state
   let fireAmt = 0;             // smoothed 0..1 fireball intensity
   let timeScale = 1, slowT = 0, slowScale = 1;
-  let fovKick = 0, rollKick = 0, caPulse = 0, flashV = 0, shake = 0, focusV = 0;
+  let fovKick = 0, rollKick = 0, caPulse = 0, flashV = 0, shake = 0, focusV = 0, glitchV = 0;
   let lastFlashAt = -10;
   const splats = [];
   const debris = [];
@@ -602,11 +715,11 @@
     let mat = mats.safe;
     if (type === HAZ) mat = mats.haz;
     if (checkerIdx !== undefined) mat = checkerIdx % 2 ? mats.finishB : mats.finishA;
-    const m = inked(new THREE.Mesh(geos.seg, mat), geos.segInk);
+    const m = inked(new THREE.Mesh(geos.seg, mat), geos.segInk, 1, mats.inkSeg);
     m.receiveShadow = true;
     if (type === HAZ) {
       for (const r of [1.45, 2.05, 2.65]) {
-        const s = inked(new THREE.Mesh(geos.spike, mats.spike), null, 1.18);
+        const s = inked(new THREE.Mesh(geos.spike, mats.spike), null, 1.18, mats.inkSeg);
         s.position.set(Math.sin(SEG_A / 2) * r, PLAT_H / 2 + 0.27, Math.cos(SEG_A / 2) * r);
         m.add(s);
       }
@@ -676,10 +789,12 @@
   }
 
   // ---------- Themes ----------
-  const themeTarget = { safe: new THREE.Color(), pole: new THREE.Color(), ball: new THREE.Color(), top: new THREE.Color(), bot: new THREE.Color() };
+  const themeTarget = { safe: new THREE.Color(), pole: new THREE.Color(), ball: new THREE.Color(), top: new THREE.Color(), bot: new THREE.Color(), rim: new THREE.Color() };
 
   function applyTheme(idx, instant) {
-    theme = THEMES[idx % THEMES.length];
+    const list = style === 'neon' ? NEON_THEMES : COMIC_THEMES;
+    themeIdx = idx;
+    theme = list[idx % list.length];
     const root = document.documentElement.style;
     root.setProperty('--bg-top', theme.bg[0]);
     root.setProperty('--bg-bot', theme.bg[1]);
@@ -689,6 +804,7 @@
     themeTarget.ball.setHex(theme.ball);
     themeTarget.top.set(theme.bg[0]);
     themeTarget.bot.set(theme.bg[1]);
+    themeTarget.rim.setHex(theme.rim || 0xffffff);
     if (instant) blendTheme(1);
   }
 
@@ -703,8 +819,39 @@
     smearMat.uniforms.uColor.value.copy(tint);
     skyMat.uniforms.uTop.value.lerp(themeTarget.top, k);
     skyMat.uniforms.uBot.value.lerp(themeTarget.bot, k);
+    skyMat.uniforms.uRim.value.lerp(themeTarget.rim, k);
+    rimU.rimColor.value.lerp(themeTarget.rim, k);
     scene.fog.color.copy(skyMat.uniforms.uBot.value).lerp(skyMat.uniforms.uTop.value, 0.35);
     moteMat.color.copy(themeTarget.ball).lerp(themeTarget.pole, 0.5);
+  }
+
+  // ---------- Art style ----------
+  // Switches everything that differs between the comic and neon looks. Gameplay is identical in both.
+  function applyStyle(name) {
+    style = name === 'comic' ? 'comic' : 'neon';
+    store.set('style', style);
+    const neon = style === 'neon';
+    document.body.classList.toggle('style-neon', neon);
+    setRamp(neon ? [40, 80, 125, 170, 215, 255] : [72, 72, 150, 150, 255, 255]);
+    rimU.rimStrength.value = neon ? 1.1 : 0;
+    mats.inkSeg.visible = !neon;                                   // neon drops platform outlines
+    mats.ink.color.setHex(neon ? 0x2a0c44 : INK);                  // and keeps thin violet ones on the ball
+    mats.haz.color.setHex(neon ? 0x14031c : 0x2a0610);
+    mats.haz.emissive.setHex(neon ? 0xff1f6a : 0xff1030);
+    mats.spike.color.setHex(neon ? 0x1c0526 : 0x300810);
+    mats.spike.emissive.setHex(neon ? 0xff3d8b : 0xff3050);
+    mats.sparkle.color.copy(neon ? hdr(2.2, 1.2, 2.2) : hdr(2.2, 1.8, 0.6));
+    speedLines.material.color.copy(neon ? hdr(1.1, 0.7, 1.6) : hdr(1.3, 1.2, 1));
+    hemi.intensity = neon ? 0.42 : 0.3;
+    hemi.color.setHex(neon ? 0xd8c8ff : 0xffffff);
+    hemi.groundColor.setHex(neon ? 0x2a0a40 : 0x3a2a5a);
+    sun.intensity = neon ? 0.62 : 0.72;
+    sun.color.setHex(neon ? 0xffe8f6 : 0xffffff);
+    setFlameColors(neon);
+    skyMat.uniforms.uStyle.value = neon ? 1 : 0;
+    if (post) post.setStyle(neon);
+    skinPreviews = null;                                           // menu pictures are redrawn in the new style
+    applyTheme(themeIdx, true);
   }
 
   // ---------- Building a run ----------
@@ -720,7 +867,7 @@
 
   function makePole(height) {
     pole = new THREE.Mesh(new THREE.CylinderGeometry(R_IN + 0.02, R_IN + 0.02, height, 40), mats.pole);
-    pole.add(new THREE.Mesh(new THREE.CylinderGeometry(R_IN + 0.07, R_IN + 0.07, height, 40), mats.ink));
+    pole.add(new THREE.Mesh(new THREE.CylinderGeometry(R_IN + 0.07, R_IN + 0.07, height, 40), mats.inkSeg));
     pole.receiveShadow = true;
     stripeTex.repeat.set(4, height / 1.45);
     tower.add(pole);
@@ -782,7 +929,9 @@
   const _s = new THREE.Vector3();
   const ballPos = () => new THREE.Vector3(0, ball.y, BALL_Z);
 
-  // Comic text pop-ups. Animations use CSS steps() so they move "on twos" like hand-drawn frames.
+  // Text pop-ups. They sit beside the ball (alternating sides) so they never hide it; banners go near the top.
+  // Animations use CSS steps() so they move "on twos" like hand-drawn frames.
+  let popSide = 1;
   function popup(text, cls, centered) {
     const el = document.createElement('div');
     el.className = 'pop' + (cls ? ' ' + cls : '');
@@ -794,11 +943,17 @@
     el.style.setProperty('--tilt', rnd(-9, 9).toFixed(1) + 'deg');
     if (centered) {
       el.style.left = '50%';
-      el.style.top = '38%';
+      el.style.top = '21%';
     } else {
-      _v.set(0, ball.y + 0.6, BALL_Z).project(camera);
-      el.style.left = ((_v.x + 1) / 2 * innerWidth + rnd(-30, 30)) + 'px';
-      el.style.top = ((1 - _v.y) / 2 * innerHeight) + 'px';
+      _v.set(0, ball.y + 0.3, BALL_Z).project(camera);
+      const bx = (_v.x + 1) / 2 * innerWidth, by = (1 - _v.y) / 2 * innerHeight;
+      const off = Math.min(150, innerWidth * 0.2) + rnd(0, 20);
+      popSide = -popSide;
+      let side = popSide;
+      if (bx + off + 90 > innerWidth) side = -1;
+      if (bx - off - 90 < 0) side = 1;
+      el.style.left = (bx + side * off) + 'px';
+      el.style.top = (by + rnd(-20, 10)) + 'px';
     }
     ui.popups.appendChild(el);
     setTimeout(() => el.remove(), centered ? 1700 : 900);
@@ -828,30 +983,50 @@
   }
 
   // Flat ink-edged ring (shockwaves, ripples).
+  // Comic: flat ring with an ink edge. Neon: a glowing ring of light.
   function ring(center, color, from, to, life) {
-    const fill = new THREE.MeshBasicMaterial({ color, transparent: true, depthWrite: false, side: THREE.DoubleSide });
-    const edge = new THREE.MeshBasicMaterial({ color: INK, transparent: true, depthWrite: false, side: THREE.DoubleSide });
+    const neon = style === 'neon';
+    const fill = new THREE.MeshBasicMaterial({ color, transparent: true, depthWrite: false, side: THREE.DoubleSide, blending: neon ? THREE.AdditiveBlending : THREE.NormalBlending });
     const m = new THREE.Mesh(geos.ring, fill);
-    const e = new THREE.Mesh(geos.ring, edge);
-    e.scale.set(1.06, 1, 1.06);
-    e.position.y = -0.01;
-    m.add(e);
+    const list = [fill];
+    if (!neon) {
+      const edge = new THREE.MeshBasicMaterial({ color: INK, transparent: true, depthWrite: false, side: THREE.DoubleSide });
+      const e = new THREE.Mesh(geos.ring, edge);
+      e.scale.set(1.06, 1, 1.06);
+      e.position.y = -0.01;
+      m.add(e);
+      list.push(edge);
+    }
     m.position.copy(center);
     m.scale.setScalar(from);
     scene.add(m);
-    addFx(m, { life, mats: [fill, edge], grow: [from, to] });
+    addFx(m, { life, mats: list, grow: [from, to] });
   }
+  // Puts an effect just behind the ball so the ball stays visible in front of it.
+  const behind = (v) => v.clone().setZ(v.z - 0.55);
 
-  // Hand-drawn impact star: holds full strength, boils between drawings, then cuts out.
+  // Impact: comic = hand-drawn burst that holds then cuts; neon = shimmering lens flare. Both swap drawings on twos.
   function impact(at, color, size, life = 0.2) {
-    const mat = new THREE.SpriteMaterial({ map: burstTex[rand(3)], color, transparent: true, depthTest: false, depthWrite: false });
+    const neon = style === 'neon';
+    const tex = neon ? flareTex : burstTex;
+    const mat = new THREE.SpriteMaterial({ map: tex[rand(3)], color, transparent: true, depthWrite: false, blending: neon ? THREE.AdditiveBlending : THREE.NormalBlending });
     mat.rotation = Math.random() * TAU;
     const s = new THREE.Sprite(mat);
     s.position.copy(at);
     s.scale.setScalar(size * 0.6);
-    s.renderOrder = 20;
     scene.add(s);
-    addFx(s, { life, mats: [mat], grow: [size * 0.6, size], hold: true, boil: burstTex });
+    addFx(s, { life, mats: [mat], grow: [size * 0.6, size], hold: !neon, boil: tex });
+  }
+  // Neon only: a painted crescent of light, like a sword slash.
+  function slash(at, color, size, life = 0.24) {
+    if (style !== 'neon') return;
+    const mat = new THREE.SpriteMaterial({ map: slashTex, color, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending });
+    mat.rotation = rnd(-0.9, 0.9);
+    const s = new THREE.Sprite(mat);
+    s.position.copy(at);
+    s.scale.setScalar(size * 0.7);
+    scene.add(s);
+    addFx(s, { life, mats: [mat], grow: [size * 0.7, size * 1.3] });
   }
 
   // Particle spray of sparkles (sprite) or solid bits (mesh).
@@ -892,8 +1067,16 @@
     ui.flash.style.background = color;
     flashV = Math.max(flashV, amount);
   }
-  // Anime impact frame: one held drawing in inverted black & white (or red), then back to colour.
+  // Big-moment frame. Comic: one held inverted black & white (or red) drawing. Neon: a music-video glitch.
   function impactFrame(red) {
+    if (style === 'neon') {
+      glitchV = red ? 1.3 : 1;
+      if (!fxOn) {
+        canvas.style.filter = 'saturate(2.6) contrast(1.25) hue-rotate(' + (red ? -30 : 40) + 'deg)';
+        setTimeout(() => { canvas.style.filter = ''; }, 110);
+      }
+      return;
+    }
     canvas.style.filter = red
       ? 'grayscale(1) contrast(9) invert(1) sepia(1) saturate(9) hue-rotate(-35deg)'
       : 'grayscale(1) contrast(9) invert(1)';
@@ -904,17 +1087,19 @@
   // Anime focus lines drawn on a 2D canvas over the scene, redrawn on twos so they flicker by hand.
   const inkCtx = ui.ink.getContext('2d');
   let inkDrawn = false;
-  function drawFocusLines(strength, color) {
+  function drawFocusLines(strength, color, light) {
     const w = ui.ink.width, h = ui.ink.height;
+    inkCtx.globalCompositeOperation = 'source-over';
     inkCtx.clearRect(0, 0, w, h);
     inkDrawn = strength > 0.02;
     if (!inkDrawn) return;
+    if (light) inkCtx.globalCompositeOperation = 'lighter';      // neon: glowing light streaks instead of ink
     const cx = w / 2, cy = h * 0.55, R = Math.hypot(w, h) * 0.62;
     inkCtx.fillStyle = color;
     const n = Math.floor(60 + 90 * strength);
     for (let i = 0; i < n; i++) {
       const a = Math.random() * TAU;
-      const spread = rnd(0.003, 0.016);
+      const spread = rnd(0.003, 0.016) * (light ? 0.5 : 1);
       const inner = R * rnd(0.5, 0.85) * (1.2 - strength * 0.45);
       inkCtx.beginPath();
       inkCtx.moveTo(cx + Math.cos(a - spread) * R * 1.3, cy + Math.sin(a - spread) * R * 1.3);
@@ -963,13 +1148,13 @@
   // Flame puffs and embers, spawned on twos so the trail reads like drawn frames.
   function fireTrail() {
     const at = new THREE.Vector3(rnd(-0.12, 0.12), ball.y + 0.25, BALL_Z + rnd(-0.12, 0.12));
-    const puff = new THREE.Mesh(geos.chip, new THREE.MeshBasicMaterial({ color: Math.random() < 0.5 ? hdr(2.6, 1.1, 0.15) : hdr(3, 2.4, 1), transparent: true }));
+    const puff = new THREE.Mesh(geos.chip, new THREE.MeshBasicMaterial({ color: style === 'neon' ? (Math.random() < 0.5 ? hdr(1.1, 0.3, 0.75) : hdr(1.2, 1, 0.8)) : (Math.random() < 0.5 ? hdr(2.6, 1.1, 0.15) : hdr(3, 2.4, 1)), transparent: true }));
     inked(puff, null, 1.3);
     puff.position.copy(at);
     puff.scale.setScalar(rnd(1.4, 2.6));
     scene.add(puff);
     addFx(puff, { vel: new THREE.Vector3(rnd(-0.6, 0.6), rnd(3, 5), rnd(-0.6, 0.6)), spin: new THREE.Vector3(rnd(-6, 6), rnd(-6, 6), 0), life: 0.33, mats: [puff.material], shrink: true });
-    spray({ sprite: sparkleTex, colors: SPARK_COLORS, count: 1, at, speed: 5, life: 0.5, gravity: 2, drag: 1.5, scale: [0.2, 0.4], up: 0.3 });
+    spray({ sprite: sparkleTex, colors: sparks(), count: 1, at, speed: 5, life: 0.5, gravity: 2, drag: 1.5, scale: [0.2, 0.4], up: 0.3 });
   }
 
   // "Multiples": held ghost copies of the ball left behind on twos while falling fast.
@@ -1062,9 +1247,10 @@
     shake = Math.max(shake, 0.45);
     focusV = 1;
     flash('radial-gradient(circle at 50% 55%, #fff6cc, #ff8a2a 45%, #ff3d00)', 0.55);
-    impact(at, 0xffe14d, 3.2, 0.3);
+    impact(behind(at), 0xffe14d, 3.2, 0.3);
+    slash(behind(at), 0xff7ae0, 3.6, 0.3);
     ring(at, hdr(1.7, 0.8, 0.2), 0.3, 3.8, 0.45);
-    spray({ sprite: sparkleTex, colors: SPARK_COLORS, count: 34, at, speed: 11, life: 0.7, gravity: 6, drag: 2, scale: [0.3, 0.7] });
+    spray({ sprite: sparkleTex, colors: sparks(), count: 34, at, speed: 11, life: 0.7, gravity: 6, drag: 2, scale: [0.3, 0.7] });
     sfx.fire();
     popup('FIREBALL!', 'fireban', true);
   }
@@ -1091,7 +1277,8 @@
     const at = ballPos();
     spray({ sprite: sparkleTex, colors: GOLD_COLORS, count: 22, at, speed: 6, life: 0.6, gravity: 2, drag: 2.5, scale: [0.3, 0.6] });
     ring(at, hdr(1.5, 1.25, 0.35), 0.2, 1.8, 0.4);
-    impact(at, 0xfff2a0, 1.6, 0.16);
+    impact(behind(at), 0xfff2a0, 1.6, 0.16);
+    if (style === 'neon') spray({ sprite: heartTex, colors: [hdr(2.6, 1, 2), hdr(2.4, 2, 2.6)], count: 8, at, speed: 4, life: 0.7, gravity: -1, drag: 2, scale: [0.25, 0.4], up: 0.3 });
     flash('#ffd23f', 0.12);
     caPulse = Math.max(caPulse, 0.4);
     sfx.star();
@@ -1144,8 +1331,9 @@
     ball.vy *= 0.5;
     const at = ballPos();
     ring(new THREE.Vector3(0, p.y, 0), hdr(1.7, 0.8, 0.2), 1, 5.2, 0.45);
-    impact(at, 0xffa040, 2.4, 0.18);
-    spray({ sprite: sparkleTex, colors: SPARK_COLORS, count: 22, at, speed: 12, life: 0.6, gravity: 10, drag: 1.5, scale: [0.3, 0.6], flat: true });
+    impact(behind(at), 0xffa040, 2.4, 0.18);
+    slash(behind(at), 0x8ff3ff, 2.8);
+    spray({ sprite: sparkleTex, colors: sparks(), count: 22, at, speed: 12, life: 0.6, gravity: 10, drag: 1.5, scale: [0.3, 0.6], flat: true });
     flash('#ff8a2a', 0.18);
     caPulse = Math.max(caPulse, 0.6);
     fovKick = Math.max(fovKick, 3);
@@ -1181,7 +1369,8 @@
     impactFrame(true);
     spray({ geo: geos.chip, colors: [tint.clone()], count: 24, at, speed: 7, life: 1.1, gravity: 16, scale: [0.6, 1.4] });
     spray({ sprite: sparkleTex, colors: [hdr(3, 0.5, 0.4), hdr(2.6, 2, 1.6)], count: 20, at, speed: 9, life: 0.6, gravity: 4, drag: 2, scale: [0.3, 0.6] });
-    impact(at, 0xff5060, 3, 0.25);
+    impact(behind(at), 0xff5060, 3, 0.25);
+    slash(behind(at), 0xff3355, 3.2);
     ring(at, hdr(1.6, 0.25, 0.25), 0.2, 4.5, 0.55);
     flash('#ff2040', 0.4);
     slowMo(0.25, 0.5);
@@ -1412,6 +1601,14 @@
     showPanel('skins');
   }
 
+  function openSettings() {
+    for (const b of document.querySelectorAll('.styleOpt[data-style]')) b.classList.toggle('on', b.dataset.style === style);
+    ui.soundOpt.classList.toggle('on', !muted);
+    ui.soundOpt.querySelector('b').textContent = muted ? 'SOUND OFF' : 'SOUND ON';
+    primaryAction = goHome;
+    showPanel('settings');
+  }
+
   function startRun(newMode, n) {
     ensureAudio();
     mode = newMode;
@@ -1476,6 +1673,12 @@
   ui.btnLevels.addEventListener('click', () => { ensureAudio(); openLevels(); });
   ui.btnEndless.addEventListener('click', () => startEndless());
   ui.btnSkins.addEventListener('click', () => { ensureAudio(); openSkins(); });
+  ui.btnSettings.addEventListener('click', () => { ensureAudio(); openSettings(); });
+  ui.settingsBack.addEventListener('click', () => goHome());
+  for (const b of document.querySelectorAll('.styleOpt[data-style]')) {
+    b.addEventListener('click', () => { ensureAudio(); applyStyle(b.dataset.style); sfx.star(); openSettings(); });
+  }
+  ui.soundOpt.addEventListener('click', () => { ensureAudio(); setMuted(!muted); openSettings(); });
   ui.skinsBack.addEventListener('click', () => goHome());
   ui.levelsBack.addEventListener('click', () => goHome());
   ui.homeBtn.addEventListener('click', () => goHome());
@@ -1591,7 +1794,8 @@
 
   function frame(now) {
     requestAnimationFrame(frame);
-    const frameSeconds = (now - last) / 1000;
+    // The first rAF timestamp can be earlier than performance.now() at load, so never let time run backwards.
+    const frameSeconds = Math.max(0, (now - last) / 1000);
     const rawDt = Math.min(0.05, frameSeconds);
     last = now;
     watchPerformance(frameSeconds);
@@ -1698,7 +1902,7 @@
       }
     }
     fireLight.position.set(0, ball.y + 0.2, BALL_Z + 0.4);
-    if (twos) fireLight.intensity = fireAmt * (0.8 + Math.random() * 0.4);
+    if (twos) fireLight.intensity = fireAmt * (style === 'neon' ? 0.45 : 0.8) * (1 + Math.random() * 0.5);
     speedLines.visible = fire && fireAmt > 0.05;
     if (speedLines.visible && twos) {
       speedLines.material.opacity = fireAmt * 0.7;
@@ -1723,7 +1927,10 @@
     if (twos) {
       stepEffects(twosDt);
       const focus = Math.max(focusV, fire ? 0.35 * fireAmt : 0);
-      if (focus > 0.02 || inkDrawn) drawFocusLines(focus, fire && focusV < 0.4 ? 'rgba(255,245,215,0.75)' : 'rgba(21,10,34,0.85)');
+      if (focus > 0.02 || inkDrawn) {
+        if (style === 'neon') drawFocusLines(focus, fire && focusV < 0.4 ? 'rgba(140,230,255,0.45)' : 'rgba(255,150,235,0.55)', true);
+        else drawFocusLines(focus, fire && focusV < 0.4 ? 'rgba(255,245,215,0.75)' : 'rgba(21,10,34,0.85)', false);
+      }
     }
     focusV = Math.max(0, focusV - rawDt * 1.6);
 
@@ -1770,9 +1977,12 @@
     if (state === 'play') updateHud();
 
     caPulse = Math.max(0, caPulse - rawDt * 3);
+    glitchV = Math.max(0, glitchV - rawDt * 5);
     if (fxOn) {
       post.uniforms.ca.value = caPulse + (fire ? fireAmt * 0.3 : 0);
-      post.uniforms.strength.value = 0.45 + fireAmt * 0.2 + flashV * 0.3;
+      post.uniforms.strength.value = (style === 'neon' ? 0.75 : 0.45) + fireAmt * 0.2 + flashV * 0.3;
+      post.uniforms.glitch.value = glitchV;
+      post.uniforms.uTime.value = fxTime;
       post.render();
     } else {
       renderer.setRenderTarget(null);
@@ -1795,13 +2005,18 @@
           smashed: p.smashed, star: p.star ? p.star.angle : null };
       },
       settings: levelSettings,
-      startLevel, startEndless, goHome, openLevels, openSkins,
+      startLevel, startEndless, goHome, openLevels, openSkins, openSettings,
+      setStyle(name) { applyStyle(name); },
+      setPost(k, v) { if (post) post.uniforms[k].value = v; },
+      get post() { return post ? { glitch: post.uniforms.glitch.value, grain: post.uniforms.grain.value, ca: post.uniforms.ca.value, glitchV } : null; },
+      get style() { return { style, rim: rimU.rimStrength.value, platformOutlines: mats.inkSeg.visible, sky: skyMat.uniforms.uStyle.value }; },
       setSkin(id) { applySkin(SKINS.find((x) => x.id === id)); },
       get skin() { return { id: skin.id, hasMap: !!mats.ball.map, expr, extras: ballBody.children.length ? ballBody.children[0].children.length : 0 }; },
     };
   }
 
   // ---------- Boot ----------
+  applyStyle(store.get('style', 'neon'));
   goHome();
   requestAnimationFrame(frame);
 })();
