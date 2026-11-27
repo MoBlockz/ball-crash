@@ -27,7 +27,12 @@ Tap **BALLS** on the home screen to pick your ball. Your choice is saved.
 
 ## Look
 
-Cel-shaded 3D with ink outlines and halftone dots, mixed with hand-drawn 2D effects: impact bursts, smear frames, anime focus lines and comic sound words. The ball and camera move smoothly (on ones). Effects move in steps (on twos and threes) for a punchy, drawn feel. Screen flashes are limited to about three per second.
+Pick an art style in **⚙ SETTINGS** on the home screen. Your choice is saved.
+
+- **Neon Idol** (default): glossy neon platforms with a glowing rim light, a night sky with a moon, sweeping concert spotlights, bokeh and glitter, painted light slashes, lens flares, hearts, film grain and quick music-video glitch flashes.
+- **Comic:** cel shading with ink outlines and halftone dots, hand-drawn impact bursts, anime focus lines and comic sound words.
+
+In both styles the ball and camera move smoothly (on ones), while effects move in steps (on twos and threes) for a punchy, drawn feel. Pop-up words appear beside the ball so they never hide it. Screen flashes are limited to about three per second.
 
 Slower devices switch off the heavy effects automatically. Add `?fx=low` or `?fx=high` to the URL to force them off or on.
 
